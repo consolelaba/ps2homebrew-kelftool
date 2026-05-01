@@ -1,47 +1,114 @@
 # kelftool
 
-An open-source utility for decrypting, encrypting and signing PS2/PSX DESR KELF files.
+An open-source utility for decrypt, encrypt and sign PS2 KELF and PSX KELF files.
 
-## You need to bring your keys
+## Build
 
-Place them in your home directory (%USERPROFILE%) in the "PS2KEYS.dat" file as a 'KEY=HEX_VALUE' pair. Or place them in your working directory.
+### Dependencies
+
+- g++ with C++17 support
+- OpenSSL 3.0 or older (`libcrypto`)
+
+### Compile
+
+- linux
+```bash
+make
+```
+
+- mac os
+> macOS ships without OpenSSL development headers. Install it via Homebrew and set the required flags before building
+```bash
+brew install openssl
+export CPPFLAGS="-I$(brew --prefix openssl)/include"
+export LDFLAGS="-L$(brew --prefix openssl)/lib"
+make
+```
 
 ## Usage
 
-    %s <main command> <headerid> <input> <output> [Flags]
-	decrypt - decrypt and check the signature of kelf files
-	encrypt <headerid> - encrypt and sign kelf files <headerid>: fmcb, fhdb, mbr
-		fmcb - for retail PS2 memory cards
-		dnasload - for retail PS2 memory cards (PSX Whitelist)
-		fhdb - for retail PS2 HDD (HDD OSD / BB Navigator)
-		dongle - for namco System 246/256 and Konami Python 1
-		mbr  - for retail PS2 HDD (mbr injection).
-		       Note: for mbr, elf should load from 0x100000 and should be without headers:
-		       readelf -h <input_elf> should show 0x100000 or 0x100008
-	Flags:
-		--keys        Specify keys to be used from PS2KEYS.dat (default, retail, dev, arcade, prototype)
-		--mgzone      Specify custom region whitelist (default 0xFF: all allowed), example: --mgzone=0x03 (Japan+North America)
-		--apptype     Specify application type (default 1: XOSDMAIN), example --apptype=7
-		--kflags      Specify custom flags for KELF Header, default: --kflags=KELF
-		--systemtype  Specify sys type (PS2 or PSX)
+```
+./build/kelftool.elf <subcommand> <args>
+```
 
+### Decrypt
 
-headerless elf creation:
+Extract and decrypt content from a KELF file:
 
-      $(EE_OBJCOPY) -O binary -v <input_elf> <headerless_elf>
-examples:
+```bash
+./build/kelftool.elf decrypt <input.kelf> <output.elf>
+```
 
-	kelftool encrypt fhdb input.elf output.kelf
-    kelftool decrypt input.kelf output.elf
-	kelftool encrypt dongle boot.elf boot.bin --keys=arcade --apptype=7
+### Encrypt
 
-*decrypt* command will also print useful information about kelf
+Pack and sign a raw ELF into a PS2 KELF file:
+
+```bash
+./build/kelftool.elf encrypt <headerid> <input.elf> <output.kelf>
+```
+
+`<headerid>` specifies the target platform:
+
+| headerid   | Description                                      |
+|------------|--------------------------------------------------|
+| `fmcb`     | Retail PS2 memory card (Free McBoot)             |
+| `dnasload` | Retail PS2 memory card (PSX whitelist bypass)    |
+| `fhdb`     | Retail PS2 HDD (HDD OSD / BB Navigator)          |
+| `mbr`      | Retail PS2 HDD (MBR injection)                   |
+| `dongle`   | Arcade (Namco System 246/256, Konami Python 1)   |
+
+> **Note for `mbr`:** ELF must be headerless and load from address `0x100000`:
+> ```bash
+> $(EE_OBJCOPY) -O binary -v <input.elf> <headerless.bin>
+> ```
+
+#### Optional flags
+
+| Flag                  | Description                                                        |
+|-----------------------|--------------------------------------------------------------------|
+| `--keys=<section>`    | Key section to use from PS2KEYS.ini (default, retail, dev, arcade, prototype) |
+| `--systemtype=<type>` | System type: `PS2` (default) or `PSX`                             |
+| `--mgzone=<hex>`      | Region whitelist bitmask, default `0xFF` (all regions)            |
+| `--apptype=<hex>`     | Application type, default `1` (xosdmain)                          |
+| `--kflags=<value>`    | Header flags: `KELF` (default), `KIRX`, or raw hex value          |
+
+### Validate
+
+Check that all required keys are present in the keystore:
+
+```bash
+./build/kelftool.elf validate
+./build/kelftool.elf validate --keys=arcade
+```
+
+By default validates the `[default]` section. Use `--keys=` to check a specific section. For `arcade` also verifies that `OVERRIDE_KBIT` and `OVERRIDE_KC` are present.
+
+#### Examples
+
+```bash
+./build/kelftool.elf encrypt fmcb BOOT.ELF BOOT.KELF
+./build/kelftool.elf decrypt BOOT.KELF BOOT.ELF
+./build/kelftool.elf encrypt dongle boot.elf boot.bin --keys=arcade --apptype=7
+./build/kelftool.elf encrypt fmcb BOOT.ELF BOOT.KELF --mgzone=0x03
+```
+
+## Keys
+
+#### You need to bring your own keys.
+
+Place `PS2KEYS.ini` in one of these locations (checked in order):
+
+1. Path set via `PS2KEYS` environment variable
+2. `./PS2KEYS.ini` (current working directory)
+3. `$HOME/PS2KEYS.ini` (home directory)
+
+See `PS2KEYS_example.ini` for the file format. Actual keys can be found at:
+- https://www.psdevwiki.com/ps2/keys
+- https://www.psdevwiki.com/ps3/Keys#PS2emu_Keys
 
 ## SHA256 Hashes of the keys
 
 ### THESE ARE HASHES, NOT THE ACTUAL KEYS
-
-#### Retail
 
 **MG_SIG_MASTER_KEY**=*e6e41172c069b752b9e88d31c70606c580b1c15ee782abd83cf34117bfc47c91*
 **MG_SIG_HASH_KEY**=*0dc3a1e225d3e701cfd07c2b25e7a3cc661ded10870218f1f22f936ba350bef5*
@@ -54,10 +121,5 @@ examples:
 **MG_CONTENT_TABLE_IV**=*3d9ac39d6e1b69b076da20a38593b2f4ccdd5f943b991c99eacbea13cb1cf0a4*
 **MG_CONTENT_IV**=*4e3f5dfaf24c8016c60a23ced78af1e469522dbedb65ca7c8abfb990458f036b*
 
-#### Arcade
-
-Note: for arcade units (Namco System 246/256 and Konami Python 1) it is necessary to provide different keys and also additional keys: **OVERRIDE_KBIT** and **OVERRIDE_KC**
-
-#### Dev and proto
-
-For DTL units it is necessary to provide different keys (dev keystore). Proto keystore probably was never used.
+> For arcade units additional keys `OVERRIDE_KBIT` and `OVERRIDE_KC` are required (use `--keys=arcade`).
+> For DTL dev units use `--keys=dev`. Proto keystore probably was never used.

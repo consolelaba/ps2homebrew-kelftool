@@ -30,11 +30,51 @@ uint8_t GApplicationType = KELFTYPE_XOSDMAIN;
 
 std::string getKeyStorePath()
 {
+    const char *env = getenv("PS2KEYS");
+    if (env != nullptr)
+        return std::string(env);
 #if defined(__linux__) || defined(__APPLE__)
-    return std::string(getenv("HOME")) + "/PS2KEYS.dat";
+    return std::string(getenv("HOME")) + "/PS2KEYS.ini";
 #else
-    return std::string(getenv("USERPROFILE")) + "\\PS2KEYS.dat";
+    return std::string(getenv("USERPROFILE")) + "\\PS2KEYS.ini";
 #endif
+}
+
+static std::string loadKeyStore(KeyStore &ks, const std::string &section)
+{
+    int ret = ks.Load("./PS2KEYS.ini", section);
+    if (ret == 0)
+        return "./PS2KEYS.ini";
+    ret = ks.Load(getKeyStorePath(), section);
+    if (ret == 0)
+        return getKeyStorePath();
+    return "";
+}
+
+int validate(int argc, char **argv)
+{
+    std::string section = "default";
+
+    for (int x = 1; x < argc; x++) {
+        if (!strncmp("--keys=", argv[x], strlen("--keys=")))
+            section = &argv[x][7];
+    }
+
+    bool needsOverride = (section == "arcade");
+
+    KeyStore ks;
+    if (loadKeyStore(ks, section).empty()) {
+        printf("Keystore validation failed for section [%s]: file not found or section missing\n", section.c_str());
+        return -1;
+    }
+
+    if (needsOverride && (ks.GetOverrideKbit().empty() || ks.GetOverrideKc().empty())) {
+        printf("Keystore validation failed for section [%s]: OVERRIDE_KBIT or OVERRIDE_KC missing\n", section.c_str());
+        return -1;
+    }
+
+    printf("Keystore OK: section [%s] has all required keys\n", section.c_str());
+    return 0;
 }
 
 int decrypt(int argc, char **argv)
@@ -55,18 +95,13 @@ int decrypt(int argc, char **argv)
     }
 
     KeyStore ks;
-    int ret = ks.Load("./PS2KEYS.dat", KeyStoreEntry);
-    if (ret != 0) {
-        // try to load keys from working directory
-        ret = ks.Load(getKeyStorePath(), KeyStoreEntry);
-        if (ret != 0) {
-            printf("Failed to load keystore: %d - %s\n", ret, KeyStore::getErrorString(ret).c_str());
-            return ret;
-        }
+    if (loadKeyStore(ks, KeyStoreEntry).empty()) {
+        printf("Failed to load keystore section [%s]\n", KeyStoreEntry.c_str());
+        return -1;
     }
 
     Kelf kelf(ks);
-    ret = kelf.LoadKelf(argv[1]);
+    int ret = kelf.LoadKelf(argv[1]);
     if (ret != 0) {
         printf("Failed to LoadKelf %d!\n", ret);
         return ret;
@@ -89,7 +124,7 @@ int encrypt(int argc, char **argv)
         printf("%s encrypt <headerid> <input> <output> [Flags]\n", argv[0]);
         printf("<headerid>: fmcb, fhdb, mbr, dnasload, dongle\n");
         printf("\tFlags:\n");
-        printf("\t\t--keys        Specify keys to be used from PS2KEYS.dat (default, retail, dev, arcade, prototype)\n");
+        printf("\t\t--keys        Specify keys to be used from PS2KEYS.ini (default, retail, dev, arcade, prototype)\n");
         printf("\t\t--mgzone      Specify custom region whitelist (default 0xFF: all allowed), example: --mgzone=0x03 (Japan+North America)\n");
         printf("\t\t--apptype     Specify application type (default 1: XOSDMAIN), example --apptype=7\n");
         printf("\t\t--kflags      Specify custom flags for KELF Header, default: --kflags=KELF\n");
@@ -161,18 +196,13 @@ int encrypt(int argc, char **argv)
     }
 
     KeyStore ks;
-    int ret = ks.Load("./PS2KEYS.dat", KeyStoreEntry);
-    if (ret != 0) {
-        // try to load keys from working directory
-        ret = ks.Load(getKeyStorePath(), KeyStoreEntry);
-        if (ret != 0) {
-            printf("Failed to load keystore: %d - %s\n", ret, KeyStore::getErrorString(ret).c_str());
-            return ret;
-        }
+    if (loadKeyStore(ks, KeyStoreEntry).empty()) {
+        printf("Failed to load keystore section [%s]\n", KeyStoreEntry.c_str());
+        return -1;
     }
 
     Kelf kelf(ks);
-    ret = kelf.LoadContent(argv[2], headerid);
+    int ret = kelf.LoadContent(argv[2], headerid);
     if (ret != 0) {
         printf("Failed to LoadContent!\n");
         return ret;
@@ -192,7 +222,8 @@ int main(int argc, char **argv)
     if (argc < 2) {
         printf("usage: %s <submodule> <args>\n", argv[0]);
         printf("Available submodules:\n");
-        printf("\tdecrypt - decrypt and check signature of kelf files\n");
+        printf("\tdecrypt  - decrypt and check signature of kelf files\n");
+        printf("\tvalidate - check that all required keys are present in the keystore\n");
         printf("\tencrypt <headerid> - encrypt and sign kelf files <headerid>: fmcb, fhdb, mbr, dnasload, dongle\n");
         printf("\t\tfmcb     - for retail PS2 memory cards\n");
         printf("\t\tdnasload - for retail PS2 memory cardsfor retail PS2 memory cards (PSX bypass)\n");
@@ -214,6 +245,8 @@ int main(int argc, char **argv)
         return decrypt(argc, argv);
     else if (strcmp("encrypt", cmd) == 0)
         return encrypt(argc, argv);
+    else if (strcmp("validate", cmd) == 0)
+        return validate(argc, argv);
 
     printf("Unknown submodule!\n");
     return -1;

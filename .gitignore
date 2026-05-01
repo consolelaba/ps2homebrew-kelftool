@@ -338,4 +338,4 @@ build/
 *.KELF
 *.XLF
 *.ELF
-PS2KEYS.dat
+PS2KEYS.ini
